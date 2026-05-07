@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:notesapp/components/note_tile.dart';
-import 'package:notesapp/database/note_database.dart';
-import 'package:notesapp/pages/note_editor_page.dart';
+import 'package:notesapp/components/task_tile.dart';
+import 'package:notesapp/database/task_database.dart';
+import 'package:notesapp/pages/task_editor_page.dart';
 import 'package:provider/provider.dart';
 
-class NoteSearchDelegate extends SearchDelegate {
+class TaskSearchDelegate extends SearchDelegate {
   @override
   List<Widget>? buildActions(BuildContext context) {
     return [
@@ -12,7 +12,7 @@ class NoteSearchDelegate extends SearchDelegate {
         icon: const Icon(Icons.clear),
         onPressed: () {
           query = '';
-          context.read<NoteDatabase>().setSearchQuery('');
+          context.read<TaskDatabase>().setSearchQuery('');
         },
       ),
     ];
@@ -23,7 +23,7 @@ class NoteSearchDelegate extends SearchDelegate {
     return IconButton(
       icon: const Icon(Icons.arrow_back),
       onPressed: () {
-        context.read<NoteDatabase>().setSearchQuery('');
+        context.read<TaskDatabase>().setSearchQuery('');
         close(context, null);
       },
     );
@@ -42,35 +42,37 @@ class NoteSearchDelegate extends SearchDelegate {
   Widget _buildSearchResults(BuildContext context) {
     // Update the search query in the database to trigger highlighting
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<NoteDatabase>().setSearchQuery(query);
+      if (context.mounted) {
+        context.read<TaskDatabase>().setSearchQuery(query);
+      }
     });
 
-    final noteDatabase = context.watch<NoteDatabase>();
-    final results = noteDatabase.currentNotes;
+    final taskDatabase = context.watch<TaskDatabase>();
+    final results = taskDatabase.currentTasks;
 
     if (results.isEmpty) {
-      return const Center(child: Text('No notes found.'));
+      return const Center(child: Text('No tasks found.'));
     }
 
     return ListView.builder(
       itemCount: results.length,
       itemBuilder: (context, index) {
-        final note = results[index];
-        return NoteTile(
-          note: note,
+        final task = results[index];
+        return TaskTile(
+          task: task,
           onTap: () {
             Navigator.push(
               context,
               MaterialPageRoute(
-                builder: (context) => NoteEditorPage(
-                  note: note,
+                builder: (context) => TaskEditorPage(
+                  task: task,
                   searchQuery: query,
                 ),
               ),
             );
           },
           onDeletePressed: () {
-            noteDatabase.deleteNote(note.id);
+            taskDatabase.deleteTask(task.id);
           },
         );
       },

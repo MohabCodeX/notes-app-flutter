@@ -3,30 +3,33 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:image_picker/image_picker.dart';
 import 'package:notesapp/components/audio_player_widget.dart';
-import 'package:notesapp/database/note_database.dart';
-import 'package:notesapp/models/note.dart';
+import 'package:notesapp/database/task_database.dart';
+import 'package:notesapp/models/task.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:record/record.dart';
 import 'package:uuid/uuid.dart';
 
-class NoteEditorPage extends StatefulWidget {
-  final Note? note;
+class TaskEditorPage extends StatefulWidget {
+  final Task? task;
   final String? searchQuery;
 
-  const NoteEditorPage({super.key, this.note, this.searchQuery});
+  const TaskEditorPage({super.key, this.task, this.searchQuery});
 
   @override
-  State<NoteEditorPage> createState() => _NoteEditorPageState();
+  State<TaskEditorPage> createState() => _TaskEditorPageState();
 }
 
-class _NoteEditorPageState extends State<NoteEditorPage> with SingleTickerProviderStateMixin {
+class _TaskEditorPageState extends State<TaskEditorPage> with SingleTickerProviderStateMixin {
   final _titleController = TextEditingController();
   final _contentController = TextEditingController();
   final _contentScrollController = ScrollController();
   final List<String> _imagePaths = [];
   final List<AudioRecording> _audioRecordings = [];
   
+  int _priority = 0; // 0: Low, 1: Medium, 2: High
+  DateTime? _dueDate;
+
   final _audioRecorder = AudioRecorder();
   bool _isRecording = false;
   DateTime? _recordingStartTime;
@@ -39,11 +42,13 @@ class _NoteEditorPageState extends State<NoteEditorPage> with SingleTickerProvid
   @override
   void initState() {
     super.initState();
-    if (widget.note != null) {
-      _titleController.text = widget.note!.title;
-      _contentController.text = widget.note!.content;
-      _imagePaths.addAll(widget.note!.imagePaths);
-      _audioRecordings.addAll(widget.note!.audioRecordings);
+    if (widget.task != null) {
+      _titleController.text = widget.task!.title;
+      _contentController.text = widget.task!.content;
+      _imagePaths.addAll(widget.task!.imagePaths);
+      _audioRecordings.addAll(widget.task!.audioRecordings);
+      _priority = widget.task!.priority;
+      _dueDate = widget.task!.dueDate;
     }
 
     _highlightController = AnimationController(
@@ -67,22 +72,18 @@ class _NoteEditorPageState extends State<NoteEditorPage> with SingleTickerProvid
     final index = content.indexOf(query);
 
     if (index != -1) {
-      // 1. Highlight the text (using selection as a temporary visual cue)
       _contentController.selection = TextSelection(
         baseOffset: index,
         extentOffset: index + query.length,
       );
 
-      // 2. Start the fade animation
       setState(() => _showHighlight = true);
       
-      // Delay before starting fade
       Future.delayed(const Duration(seconds: 1), () {
         if (mounted) {
           _highlightController.forward().then((_) {
             if (mounted) {
               setState(() => _showHighlight = false);
-              // Clear selection after fade
               _contentController.selection = const TextSelection.collapsed(offset: 0);
             }
           });
@@ -101,7 +102,7 @@ class _NoteEditorPageState extends State<NoteEditorPage> with SingleTickerProvid
     super.dispose();
   }
 
-  void _saveNote() {
+  void _saveTask() {
     final title = _titleController.text;
     final content = _contentController.text;
 
@@ -110,10 +111,25 @@ class _NoteEditorPageState extends State<NoteEditorPage> with SingleTickerProvid
       return;
     }
 
-    if (widget.note == null) {
-      context.read<NoteDatabase>().addNote(title, content, images: _imagePaths, audio: _audioRecordings);
+    if (widget.task == null) {
+      context.read<TaskDatabase>().addTask(
+        title, 
+        content, 
+        images: _imagePaths, 
+        audio: _audioRecordings,
+        priority: _priority,
+        dueDate: _dueDate,
+      );
     } else {
-      context.read<NoteDatabase>().updateNote(widget.note!.id, title, content, images: _imagePaths, audio: _audioRecordings);
+      context.read<TaskDatabase>().updateTask(
+        widget.task!.id, 
+        title, 
+        content, 
+        images: _imagePaths, 
+        audio: _audioRecordings,
+        priority: _priority,
+        dueDate: _dueDate,
+      );
     }
 
     Navigator.pop(context);
@@ -141,6 +157,34 @@ class _NoteEditorPageState extends State<NoteEditorPage> with SingleTickerProvid
     }
   }
 
+  Future<void> _selectDueDate() async {
+    final DateTime? pickedDate = await showDatePicker(
+      context: context,
+      initialDate: _dueDate ?? DateTime.now(),
+      firstDate: DateTime.now(),
+      lastDate: DateTime(2100),
+    );
+
+    if (pickedDate != null && mounted) {
+      final TimeOfDay? pickedTime = await showTimePicker(
+        context: context,
+        initialTime: TimeOfDay.fromDateTime(_dueDate ?? DateTime.now()),
+      );
+
+      if (pickedTime != null && mounted) {
+        setState(() {
+          _dueDate = DateTime(
+            pickedDate.year,
+            pickedDate.month,
+            pickedDate.day,
+            pickedTime.hour,
+            pickedTime.minute,
+          );
+        });
+      }
+    }
+  }
+
   Future<void> _startRecording() async {
     try {
       if (await _audioRecorder.hasPermission()) {
@@ -148,10 +192,12 @@ class _NoteEditorPageState extends State<NoteEditorPage> with SingleTickerProvid
         final path = '${dir.path}/${const Uuid().v4()}.m4a';
         
         await _audioRecorder.start(const RecordConfig(), path: path);
-        setState(() {
-          _isRecording = true;
-          _recordingStartTime = DateTime.now();
-        });
+        if (mounted) {
+          setState(() {
+            _isRecording = true;
+            _recordingStartTime = DateTime.now();
+          });
+        }
       }
     } catch (e) {
       debugPrint('Error starting recording: $e');
@@ -162,15 +208,17 @@ class _NoteEditorPageState extends State<NoteEditorPage> with SingleTickerProvid
     final path = await _audioRecorder.stop();
     if (path != null && _recordingStartTime != null) {
       final duration = DateTime.now().difference(_recordingStartTime!).inMilliseconds;
-      setState(() {
-        _isRecording = false;
-        _audioRecordings.add(AudioRecording(
-          path: path, 
-          timestamp: _recordingStartTime!,
-          durationMs: duration,
-        ));
-        _recordingStartTime = null;
-      });
+      if (mounted) {
+        setState(() {
+          _isRecording = false;
+          _audioRecordings.add(AudioRecording(
+            path: path, 
+            timestamp: _recordingStartTime!,
+            durationMs: duration,
+          ));
+          _recordingStartTime = null;
+        });
+      }
     }
   }
 
@@ -191,7 +239,7 @@ class _NoteEditorPageState extends State<NoteEditorPage> with SingleTickerProvid
             color: _isRecording ? Colors.red : null,
           ),
           IconButton(
-            onPressed: _saveNote,
+            onPressed: _saveTask,
             icon: const Icon(Icons.check),
           ),
         ],
@@ -203,6 +251,7 @@ class _NoteEditorPageState extends State<NoteEditorPage> with SingleTickerProvid
               controller: _contentScrollController,
               padding: const EdgeInsets.symmetric(horizontal: 25.0),
               child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   // TITLE
                   TextField(
@@ -212,7 +261,7 @@ class _NoteEditorPageState extends State<NoteEditorPage> with SingleTickerProvid
                       color: Theme.of(context).colorScheme.inversePrimary,
                     ),
                     decoration: InputDecoration(
-                      hintText: 'Title',
+                      hintText: 'Task Title',
                       hintStyle: GoogleFonts.dmSerifText(
                         fontSize: 32,
                         color: Theme.of(context).colorScheme.secondary,
@@ -222,12 +271,97 @@ class _NoteEditorPageState extends State<NoteEditorPage> with SingleTickerProvid
                     maxLines: 1,
                   ),
 
-                  const SizedBox(height: 10),
+                  // PRIORITY & DUE DATE ROW
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.center,
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              "Priority",
+                              style: TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.bold,
+                                color: Theme.of(context).colorScheme.secondary,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            SingleChildScrollView(
+                              scrollDirection: Axis.horizontal,
+                              child: Row(
+                                children: [
+                                  _PriorityChip(
+                                    label: "Low",
+                                    isSelected: _priority == 0,
+                                    color: Colors.blue,
+                                    onTap: () => setState(() => _priority = 0),
+                                  ),
+                                  _PriorityChip(
+                                    label: "Medium",
+                                    isSelected: _priority == 1,
+                                    color: Colors.orange,
+                                    onTap: () => setState(() => _priority = 1),
+                                  ),
+                                  _PriorityChip(
+                                    label: "High",
+                                    isSelected: _priority == 2,
+                                    color: Colors.red,
+                                    onTap: () => setState(() => _priority = 2),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      
+                      // Due Date Button
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Text(
+                            "Deadline",
+                            style: TextStyle(
+                              fontSize: 12,
+                              fontWeight: FontWeight.bold,
+                              color: Theme.of(context).colorScheme.secondary,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          TextButton.icon(
+                            onPressed: _selectDueDate,
+                            style: TextButton.styleFrom(
+                              foregroundColor: Theme.of(context).colorScheme.inversePrimary,
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              minimumSize: Size.zero,
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
+                            icon: Icon(
+                              Icons.calendar_today_rounded, 
+                              size: 16,
+                              color: _dueDate != null ? Colors.blue : Theme.of(context).colorScheme.secondary,
+                            ),
+                            label: Text(
+                              _dueDate == null ? "No deadline" : Task(id: 0, title: '', content: '', timestamp: DateTime.now(), dueDate: _dueDate).formattedDueDate,
+                              style: TextStyle(
+                                fontSize: 14,
+                                color: Theme.of(context).colorScheme.inversePrimary,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+
+                  const SizedBox(height: 20),
 
                   // IMAGES
                   if (_imagePaths.isNotEmpty)
                     SizedBox(
-                      height: 200,
+                      height: 150,
                       child: ListView.builder(
                         scrollDirection: Axis.horizontal,
                         itemCount: _imagePaths.length,
@@ -236,7 +370,7 @@ class _NoteEditorPageState extends State<NoteEditorPage> with SingleTickerProvid
                             children: [
                               Container(
                                 margin: const EdgeInsets.only(right: 10),
-                                width: 150,
+                                width: 120,
                                 decoration: BoxDecoration(
                                   borderRadius: BorderRadius.circular(12),
                                   image: DecorationImage(
@@ -294,7 +428,7 @@ class _NoteEditorPageState extends State<NoteEditorPage> with SingleTickerProvid
                           color: Theme.of(context).colorScheme.inversePrimary,
                         ),
                         decoration: InputDecoration(
-                          hintText: 'Start typing...',
+                          hintText: 'Add details...',
                           hintStyle: TextStyle(
                             color: Theme.of(context).colorScheme.secondary,
                           ),
@@ -303,16 +437,14 @@ class _NoteEditorPageState extends State<NoteEditorPage> with SingleTickerProvid
                         maxLines: null,
                       ),
                       
-                      // Highlight Overlay (simple selection-based for now as it handles scrolling automatically)
+                      // Highlight Overlay
                       if (_showHighlight)
                         Positioned.fill(
                           child: IgnorePointer(
                             child: FadeTransition(
                               opacity: _highlightAnimation,
                               child: Container(
-                                // This is a subtle indicator, since actual text-range background 
-                                // inside a TextField is complex, we use the selection color
-                                // which Flutter's TextField handles natively for scrolling to.
+                                color: Colors.yellow.withValues(alpha: 0.3),
                               ),
                             ),
                           ),
@@ -324,6 +456,47 @@ class _NoteEditorPageState extends State<NoteEditorPage> with SingleTickerProvid
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _PriorityChip extends StatelessWidget {
+  final String label;
+  final bool isSelected;
+  final Color color;
+  final VoidCallback onTap;
+
+  const _PriorityChip({
+    required this.label,
+    required this.isSelected,
+    required this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        margin: const EdgeInsets.only(right: 8),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        decoration: BoxDecoration(
+          color: isSelected ? color : color.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: isSelected ? color : color.withValues(alpha: 0.3),
+            width: 1,
+          ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            color: isSelected ? Colors.white : color,
+            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+            fontSize: 13,
+          ),
+        ),
       ),
     );
   }

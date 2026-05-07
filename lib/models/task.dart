@@ -45,21 +45,27 @@ class AudioRecording {
   }
 }
 
-class Note {
+class Task {
   int id;
   String title;
   String content;
   DateTime timestamp;
   List<String> imagePaths;
   List<AudioRecording> audioRecordings;
+  bool isCompleted;
+  int priority; // 0: Low, 1: Medium, 2: High
+  DateTime? dueDate;
 
-  Note({
+  Task({
     required this.id,
     required this.title,
     required this.content,
     required this.timestamp,
     this.imagePaths = const [],
     this.audioRecordings = const [],
+    this.isCompleted = false,
+    this.priority = 0,
+    this.dueDate,
   });
 
   Map<String, dynamic> toMap() {
@@ -70,11 +76,13 @@ class Note {
       'timestamp': timestamp.toIso8601String(),
       'imagePaths': jsonEncode(imagePaths),
       'audioPaths': jsonEncode(audioRecordings.map((r) => r.toMap()).toList()),
+      'isCompleted': isCompleted ? 1 : 0,
+      'priority': priority,
+      'dueDate': dueDate?.toIso8601String(),
     };
   }
 
-  factory Note.fromMap(Map<String, dynamic> map) {
-    // Helper to safely decode JSON strings from DB
+  factory Task.fromMap(Map<String, dynamic> map) {
     dynamic decode(String key) {
       final val = map[key];
       if (val == null || val is! String || val.isEmpty) return [];
@@ -88,7 +96,7 @@ class Note {
     final rawImages = decode('imagePaths');
     final rawAudio = decode('audioPaths');
 
-    return Note(
+    return Task(
       id: map['id'] is int ? map['id'] : 0,
       title: map['title']?.toString() ?? '',
       content: map['content']?.toString() ?? '',
@@ -101,8 +109,16 @@ class Note {
           return AudioRecording(path: item.toString(), timestamp: DateTime.now());
         }
       }).toList() : [],
+      isCompleted: (map['isCompleted'] == 1),
+      priority: map['priority'] is int ? map['priority'] : 0,
+      dueDate: map['dueDate'] != null ? DateTime.tryParse(map['dueDate'].toString()) : null,
     );
   }
 
   String get formattedTimestamp => DateFormat('MMM d, yyyy • h:mm a').format(timestamp);
+  
+  String get formattedDueDate {
+    if (dueDate == null) return '';
+    return DateFormat('MMM d, h:mm a').format(dueDate!);
+  }
 }

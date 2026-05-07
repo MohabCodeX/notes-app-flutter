@@ -12,16 +12,20 @@ class MyDrawer extends StatelessWidget {
       child: Column(
         children: [
           // header
-          const DrawerHeader(
-            child: Icon(Icons.edit_note_rounded, size: 48),
+          DrawerHeader(
+            child: Icon(
+              Icons.bolt_rounded, 
+              size: 48,
+              color: Theme.of(context).colorScheme.inversePrimary,
+            ),
           ),
 
           const SizedBox(height: 25),
 
-          // notes tile
+          // tasks tile
           DrawerTile(
-            title: "N O T E S",
-            leading: const Icon(Icons.home),
+            title: "T A S K S",
+            leading: const Icon(Icons.check_circle_outline),
             onTap: () => Navigator.pop(context),
           ),
 
